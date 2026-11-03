@@ -1,0 +1,81 @@
+name: release
+
+on:
+  push:
+    tags: ["artwork-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: resolve and verify the version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#artwork-v}"
+          if [ -z "$version" ] || [ "$version" = "$GITHUB_REF_NAME" ]; then
+            echo "error: tag must look like artwork-vX.Y.Z" >&2
+            exit 1
+          fi
+
+          file=$(tr -d '[:space:]' <VERSION)
+          if [ "$version" != "$file" ]; then
+            echo "error: tag version $version does not match VERSION ($file)" >&2
+            exit 1
+          fi
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+      - name: build the archive
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: make dist VERSION="$VERSION"
+
+      - name: checksum
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cd out
+          sha256sum "deblite-artwork-${VERSION}.tar.gz" >SHA256SUMS
+          cat SHA256SUMS
+
+      - name: publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          notes=$(mktemp)
+          {
+            echo "DebLite artwork ${VERSION}"
+            echo
+            echo "Wallpapers for the DebLite live ISOs."
+            echo
+            echo "Verify the tarball against \`SHA256SUMS\`."
+          } >"$notes"
+
+          assets=(
+            "out/deblite-artwork-${VERSION}.tar.gz"
+            "out/SHA256SUMS"
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${assets[@]}" \
+              --title "DebLite artwork ${VERSION}" \
+              --notes-file "$notes"
+          fi

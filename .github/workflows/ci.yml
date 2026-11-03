@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+      - name: build the archive
+        run: make dist VERSION=0.0.0
+
+      - name: inspect the archive
+        run: |
+          tar -tzf out/deblite-artwork-0.0.0.tar.gz
+          test -n "$(tar -tzf out/deblite-artwork-0.0.0.tar.gz |
+            grep -E 'wallpapers/.*\.(jpg|jpeg|png|webp|svg)$' | head -n1)"
+          sha256sum out/deblite-artwork-0.0.0.tar.gz
